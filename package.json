@@ -1,0 +1,26 @@
+{
+  "name": "businesslog-ai",
+  "version": "1.0.0",
+  "description": "Your Business AI. Self-Hosted. Private. Powerful. — Docker or Cloudflare.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "build": "tsc --noEmit",
+    "docker:build": "docker build -f docker/Dockerfile -t businesslog-ai .",
+    "docker:up": "docker compose -f docker/docker-compose.yml up -d",
+    "docker:down": "docker compose -f docker/docker-compose.yml down"
+  },
+  "dependencies": {
+    "hono": "^4.4.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240529.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^3.60.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT"
+}
