@@ -9,11 +9,14 @@
   const state = {
     currentUser: null,
     token: null,
+    isGuest: false,
+    guestMessagesLeft: 3,
     conversations: [],
     activeConversation: null,
     messages: [],
     adminData: { users: [], analytics: {} },
-    ws: null
+    ws: null,
+    _pendingFile: null
   };
 
   // ---- DOM Helpers ----
@@ -25,6 +28,7 @@
     if (attrs) Object.entries(attrs).forEach(([k, v]) => {
       if (k === 'class') e.className = v;
       else if (k === 'text') e.textContent = v;
+      else if (k === 'html') e.innerHTML = v;
       else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
       else e.setAttribute(k, v);
     });
@@ -66,7 +70,7 @@
     if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
     try {
       const res = await fetch(path, { ...options, headers: { ...headers, ...options.headers } });
-      if (res.status === 401) { logout(); throw new Error('Session expired'); }
+      if (res.status === 401 && !state.isGuest) { logout(); throw new Error('Session expired'); }
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || 'Request failed (' + res.status + ')');
@@ -92,6 +96,16 @@
     $('#app').classList.remove('hidden');
   }
 
+  function enterGuestMode() {
+    state.isGuest = true;
+    state.guestMessagesLeft = 3;
+    state.currentUser = { id: 'guest', name: 'Guest', email: '', role: 'guest' };
+    $('#guest-banner').classList.remove('hidden');
+    $('#guest-count').textContent = state.guestMessagesLeft;
+    hideLoginModal();
+    initApp();
+  }
+
   async function register(name, email, password, team) {
     showSpinner();
     try {
@@ -101,7 +115,9 @@
       });
       state.token = data.token;
       state.currentUser = data.user;
+      state.isGuest = false;
       localStorage.setItem('bl_token', data.token);
+      $('#guest-banner').classList.add('hidden');
       hideLoginModal();
       initApp();
       showToast('Account created!', 'success');
@@ -118,7 +134,9 @@
       });
       state.token = data.token;
       state.currentUser = data.user;
+      state.isGuest = false;
       localStorage.setItem('bl_token', data.token);
+      $('#guest-banner').classList.add('hidden');
       hideLoginModal();
       initApp();
       showToast('Welcome back!', 'success');
@@ -129,25 +147,34 @@
   function logout() {
     state.token = null;
     state.currentUser = null;
+    state.isGuest = false;
     state.conversations = [];
     state.messages = [];
     state.activeConversation = null;
     localStorage.removeItem('bl_token');
     if (state.ws) { state.ws.close(); state.ws = null; }
+    $('#guest-banner').classList.add('hidden');
     showLoginModal();
   }
 
   function checkAuth() {
     const token = localStorage.getItem('bl_token');
-    if (!token) { showLoginModal(); return; }
+    if (!token) {
+      // Auto-enter guest mode
+      enterGuestMode();
+      return;
+    }
     state.token = token;
     // Validate token by fetching profile
     api('/api/auth/me').then(user => {
       state.currentUser = user;
+      state.isGuest = false;
       hideLoginModal();
       initApp();
     }).catch(() => {
-      showLoginModal();
+      // Token expired, enter guest mode
+      localStorage.removeItem('bl_token');
+      enterGuestMode();
     });
   }
 
@@ -156,6 +183,7 @@
   // ============================================================
 
   async function loadConversations() {
+    if (state.isGuest) return;
     try {
       state.conversations = await api('/api/conversations');
       renderConversations();
@@ -218,6 +246,16 @@
   }
 
   async function sendMessage(text, file) {
+    if (state.isGuest) {
+      state.guestMessagesLeft--;
+      $('#guest-count').textContent = state.guestMessagesLeft;
+      if (state.guestMessagesLeft <= 0) {
+        showToast('Free messages used up. Please sign up to continue.', 'error');
+        showLoginModal();
+        return;
+      }
+    }
+
     if (!state.activeConversation) { showToast('Select a conversation first', 'error'); return; }
     // Optimistic render
     const tempMsg = { senderId: state.currentUser.id, senderName: state.currentUser.name, text, createdAt: new Date().toISOString(), file: file ? file.name : null };
@@ -263,6 +301,8 @@
   // ============================================================
 
   function toggleAdmin() {
+    if (state.isGuest) { showToast('Sign in to access admin panel', 'error'); return; }
+    if (state.currentUser && state.currentUser.role !== 'admin') { showToast('Admin access required', 'error'); return; }
     const panel = $('#admin-panel');
     const grid = $('.main-grid');
     const isOpen = !panel.classList.contains('hidden');
@@ -274,6 +314,7 @@
       grid.classList.add('admin-open');
       loadUsers();
       loadAnalytics();
+      loadAuditLog();
     }
   }
 
@@ -282,6 +323,7 @@
       const data = await api('/api/users');
       state.adminData.users = data;
       renderUsers();
+      renderTeamMembers(data);
     } catch (_) {}
   }
 
@@ -289,6 +331,7 @@
     const list = $('#user-list');
     list.innerHTML = '';
     state.adminData.users.forEach(user => {
+      const roleBadge = el('span', { class: 'user-role-badge ' + user.role, text: user.role });
       const li = el('li', { class: 'user-item' },
         el('span', { class: 'avatar avatar-sm' }),
         el('div', { class: 'user-info' },
@@ -303,12 +346,26 @@
         el('button', { class: 'btn btn-icon btn-sm user-remove', 'aria-label': 'Remove user', text: '\u00D7' })
       );
       renderAvatar(li.querySelector('.avatar'), user.name, 'sm');
-      // Set current role
       const sel = li.querySelector('select');
       sel.value = user.role || 'member';
       sel.addEventListener('change', () => changeRole(user.id, sel.value));
       li.querySelector('.user-remove').addEventListener('click', () => removeUser(user.id));
       list.appendChild(li);
+    });
+  }
+
+  function renderTeamMembers(users) {
+    const container = $('#team-members-list');
+    if (!container) return;
+    container.innerHTML = '';
+    (users || []).slice(0, 8).forEach(user => {
+      const member = el('div', { class: 'team-member' },
+        el('span', { class: 'avatar' }),
+        el('span', { class: 'team-member-name', text: user.name }),
+        el('span', { class: 'team-member-status' })
+      );
+      renderAvatar(member.querySelector('.avatar'), user.name, 'sm');
+      container.appendChild(member);
     });
   }
 
@@ -335,7 +392,7 @@
 
   async function changeRole(id, role) {
     try {
-      await api('/api/users/' + id + '/role', { method: 'PATCH', body: JSON.stringify({ role }) });
+      await api('/api/users/' + id + '/role', { method: 'PUT', body: JSON.stringify({ role }) });
       showToast('Role updated', 'success');
     } catch (_) {}
   }
@@ -352,13 +409,13 @@
   function renderAnalytics(data) {
     $('#stat-messages').textContent = data.totalMessages || 0;
     $('#stat-active-users').textContent = data.activeUsers || 0;
-    $('#stat-avg-response').textContent = (data.avgResponseTime || 0) + 'm';
-    $('#stat-topics').textContent = data.topics || 0;
-    drawBarChart('chart-messages', data.messagesByDay || generateSampleData(7, 50, 200), 'Messages');
-    drawBarChart('chart-users', data.activeUsersByDay || generateSampleData(7, 5, 30), 'Users');
-    drawPieChart('chart-topics', data.topTopics || [
-      { label: 'Engineering', value: 35 }, { label: 'Sales', value: 25 },
-      { label: 'Support', value: 20 }, { label: 'Other', value: 20 }
+    $('#stat-avg-response').textContent = (data.avgResponseTime || 0).toFixed(1) + 'm';
+    $('#stat-topics').textContent = (data.topTopics || []).length;
+    renderCSSBarChart('chart-messages-bar', data.messagesByDay || generateSampleData(7, 50, 200), 'Messages');
+    renderCSSBarChart('chart-users-bar', data.activeUsersByDay || generateSampleData(7, 5, 30), 'Users');
+    renderTopicBars('chart-topics-bar', data.topTopics || [
+      { topic: 'Financial Analysis', count: 35 }, { topic: 'Strategy', count: 25 },
+      { topic: 'Process Optimization', count: 20 }, { topic: 'Communication', count: 15 }
     ]);
   }
 
@@ -369,6 +426,90 @@
       data.push({ date: d.toLocaleDateString('en', { weekday: 'short' }), value: Math.floor(Math.random() * (max - min) + min) });
     }
     return data;
+  }
+
+  function renderCSSBarChart(containerId, data, label) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const title = container.querySelector('h4');
+    container.innerHTML = '';
+    if (title) container.appendChild(title);
+    else container.appendChild(el('h4', { text: label }));
+
+    if (!data.length) return;
+    const maxVal = Math.max(...data.map(d => d.value), 1);
+
+    data.forEach(d => {
+      const pct = Math.round((d.value / maxVal) * 100);
+      const row = el('div', { class: 'css-bar-row' },
+        el('span', { class: 'css-bar-label', text: d.date }),
+        el('div', { class: 'css-bar-track' },
+          el('div', { class: 'css-bar-fill', style: 'width:' + pct + '%' },
+            el('span', { class: 'css-bar-val', text: String(d.value) })
+          )
+        )
+      );
+      container.appendChild(row);
+    });
+  }
+
+  function renderTopicBars(containerId, topics) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = '';
+    container.appendChild(el('h4', { text: 'Top Topics' }));
+
+    if (!topics.length) return;
+    const maxVal = Math.max(...topics.map(t => t.count), 1);
+
+    topics.forEach(t => {
+      const pct = Math.round((t.count / maxVal) * 100);
+      const row = el('div', { class: 'css-bar-row' },
+        el('span', { class: 'css-bar-label', text: t.topic ? t.topic.slice(0, 10) : '' }),
+        el('div', { class: 'css-bar-track' },
+          el('div', { class: 'css-bar-fill success', style: 'width:' + pct + '%' },
+            el('span', { class: 'css-bar-val', text: String(t.count) })
+          )
+        )
+      );
+      container.appendChild(row);
+    });
+  }
+
+  // ---- Audit Log ----
+
+  async function loadAuditLog() {
+    try {
+      const data = await api('/api/export?format=audit');
+      renderAuditLog(data.entries || generateSampleAuditLog());
+    } catch (_) {
+      renderAuditLog(generateSampleAuditLog());
+    }
+  }
+
+  function generateSampleAuditLog() {
+    return [
+      { type: 'action', text: '<strong>Admin</strong> changed role of <strong>Jane</strong> to Member', time: '2 min ago' },
+      { type: 'info', text: '<strong>Alice</strong> logged in from 192.168.1.10', time: '15 min ago' },
+      { type: 'action', text: '<strong>Admin</strong> exported analytics report', time: '1 hour ago' },
+      { type: 'warning', text: 'Failed login attempt for <strong>bob@company.com</strong>', time: '3 hours ago' },
+      { type: 'info', text: '<strong>Bob</strong> uploaded file Q1-report.xlsx', time: '5 hours ago' },
+      { type: 'action', text: '<strong>Admin</strong> invited <strong>carol@company.com</strong>', time: '1 day ago' },
+    ];
+  }
+
+  function renderAuditLog(entries) {
+    const list = $('#audit-log-list');
+    if (!list) return;
+    list.innerHTML = '';
+    entries.forEach(entry => {
+      const item = el('div', { class: 'audit-entry' },
+        el('span', { class: 'audit-dot ' + (entry.type || 'info') }),
+        el('span', { class: 'audit-text', html: entry.text }),
+        el('span', { class: 'audit-time', text: entry.time })
+      );
+      list.appendChild(item);
+    });
   }
 
   async function exportReport(type, range) {
@@ -390,77 +531,24 @@
     hideSpinner();
   }
 
-  // ============================================================
-  //  CHART RENDERING (Canvas)
-  // ============================================================
-
-  function drawBarChart(canvasId, data, label) {
-    const canvas = document.getElementById(canvasId);
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const W = canvas.width;
-    const H = canvas.height;
-    ctx.clearRect(0, 0, W, H);
-
-    if (!data.length) return;
-    const maxVal = Math.max(...data.map(d => d.value), 1);
-    const barW = (W - 40) / data.length;
-    const chartH = H - 30;
-
-    data.forEach((d, i) => {
-      const barH = (d.value / maxVal) * (chartH - 10);
-      const x = 30 + i * barW;
-      const y = chartH - barH;
-      ctx.fillStyle = '#3b82f6';
-      ctx.fillRect(x + 2, y, barW - 4, barH);
-      // Label
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = '9px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(d.date, x + barW / 2, H - 4);
-      // Value
-      ctx.fillStyle = '#e2e8f0';
-      ctx.fillText(d.value, x + barW / 2, y - 4);
-    });
-
-    // Y axis
-    ctx.strokeStyle = '#334155';
-    ctx.beginPath(); ctx.moveTo(28, 0); ctx.lineTo(28, chartH); ctx.stroke();
-  }
-
-  function drawPieChart(canvasId, data) {
-    const canvas = document.getElementById(canvasId);
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const W = canvas.width;
-    const H = canvas.height;
-    ctx.clearRect(0, 0, W, H);
-
-    const total = data.reduce((s, d) => s + d.value, 0) || 1;
-    const cx = W * 0.35;
-    const cy = H / 2;
-    const r = Math.min(cx, cy) - 10;
-    const colors = ['#3b82f6', '#8b5cf6', '#22c55e', '#f59e0b', '#ec4899', '#06b6d4'];
-    let angle = -Math.PI / 2;
-
-    data.forEach((d, i) => {
-      const slice = (d.value / total) * 2 * Math.PI;
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.arc(cx, cy, r, angle, angle + slice);
-      ctx.closePath();
-      ctx.fillStyle = colors[i % colors.length];
-      ctx.fill();
-      // Legend
-      const ly = 14 + i * 18;
-      ctx.fillStyle = colors[i % colors.length];
-      ctx.fillRect(W * 0.7, ly - 8, 10, 10);
-      ctx.fillStyle = '#e2e8f0';
-      ctx.font = '11px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillText(d.label + ' (' + d.value + '%)', W * 0.7 + 14, ly);
-      angle += slice;
-    });
+  async function exportJSON() {
+    showSpinner();
+    try {
+      const res = await fetch('/api/export?format=json', {
+        headers: { 'Authorization': 'Bearer ' + state.token }
+      });
+      if (!res.ok) throw new Error('Export failed');
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'businesslog-export.json'; a.click();
+      URL.revokeObjectURL(url);
+      showToast('JSON export downloaded', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+    hideSpinner();
   }
 
   // ============================================================
@@ -468,6 +556,7 @@
   // ============================================================
 
   function connectWebSocket() {
+    if (state.isGuest) return;
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = protocol + '//' + location.host + '/ws?token=' + state.token;
     const ws = new WebSocket(url);
@@ -508,6 +597,7 @@
     const target = $('#admin-' + section);
     if (target) target.classList.remove('hidden');
     if (section === 'analytics') loadAnalytics();
+    if (section === 'audit') loadAuditLog();
   }
 
   // ============================================================
@@ -525,11 +615,20 @@
   // ============================================================
 
   function initApp() {
-    // Set user info in header
     if (state.currentUser) {
       renderAvatar($('#user-avatar-small'), state.currentUser.name, 'sm');
+      const ddAvatar = $('#dropdown-avatar');
+      if (ddAvatar) renderAvatar(ddAvatar, state.currentUser.name, 'sm');
       $('#dropdown-name').textContent = state.currentUser.name;
-      $('#dropdown-email').textContent = state.currentUser.email;
+      $('#dropdown-email').textContent = state.currentUser.email || 'Guest';
+      const roleEl = $('#dropdown-role');
+      if (roleEl) roleEl.textContent = state.currentUser.role || 'guest';
+
+      // Show/hide admin button based on role
+      const adminBtn = $('#admin-toggle');
+      if (adminBtn) {
+        adminBtn.style.display = (state.currentUser.role === 'admin') ? '' : 'none';
+      }
     }
     loadConversations();
     connectWebSocket();
@@ -562,6 +661,10 @@
       e.preventDefault();
       register($('#register-name').value, $('#register-email').value, $('#register-password').value, $('#register-team').value);
     });
+
+    // Guest mode buttons
+    $('#guest-signup').addEventListener('click', () => { $$('.modal-tab')[1].click(); showLoginModal(); });
+    $('#guest-login').addEventListener('click', () => { $$('.modal-tab')[0].click(); showLoginModal(); });
 
     // Top bar
     $('#sidebar-toggle').addEventListener('click', toggleSidebar);
@@ -656,6 +759,7 @@
     $('#export-messages').addEventListener('click', () => exportReport('messages', $('#export-date-range').value));
     $('#export-users').addEventListener('click', () => exportReport('users', $('#export-date-range').value));
     $('#export-analytics').addEventListener('click', () => exportReport('analytics', $('#export-date-range').value));
+    $('#export-json').addEventListener('click', () => exportJSON());
   }
 
   function clearFilePreview() {

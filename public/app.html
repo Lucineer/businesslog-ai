@@ -14,13 +14,14 @@
   <div id="auth-modal" class="modal-overlay" role="dialog" aria-labelledby="auth-title" aria-modal="true">
     <div class="modal">
       <div class="modal-tabs">
-        <button class="modal-tab active" data-tab="login" type="button">Log In</button>
-        <button class="modal-tab" data-tab="register" type="button">Register</button>
+        <button class="modal-tab active" data-tab="login" type="button">Sign In</button>
+        <button class="modal-tab" data-tab="register" type="button">Sign Up</button>
       </div>
 
       <!-- Login Form -->
       <form id="login-form" class="auth-form" aria-label="Login form">
         <h2 id="auth-title">Welcome Back</h2>
+        <p class="auth-subtitle">Sign in to your BusinessLog AI account</p>
         <div class="form-group">
           <label for="login-email">Email</label>
           <input type="email" id="login-email" placeholder="you@company.com" required autocomplete="email">
@@ -29,34 +30,35 @@
           <label for="login-password">Password</label>
           <input type="password" id="login-password" placeholder="Enter password" required autocomplete="current-password">
         </div>
-        <button type="submit" class="btn btn-primary btn-block">Log In</button>
+        <button type="submit" class="btn btn-primary btn-block">Sign In</button>
         <p class="form-footer">
-          No account? <a href="#" id="switch-to-register">Register here</a>
+          No account? <a href="#" id="switch-to-register">Create one</a>
         </p>
       </form>
 
       <!-- Register Form -->
       <form id="register-form" class="auth-form hidden" aria-label="Registration form">
         <h2>Create Account</h2>
+        <p class="auth-subtitle">Get started with your team's AI assistant</p>
         <div class="form-group">
           <label for="register-name">Full Name</label>
           <input type="text" id="register-name" placeholder="Jane Smith" required autocomplete="name">
         </div>
         <div class="form-group">
-          <label for="register-email">Email</label>
+          <label for="register-email">Work Email</label>
           <input type="email" id="register-email" placeholder="you@company.com" required autocomplete="email">
         </div>
         <div class="form-group">
           <label for="register-password">Password</label>
-          <input type="password" id="register-password" placeholder="Create password" required minlength="8" autocomplete="new-password">
+          <input type="password" id="register-password" placeholder="Minimum 8 characters" required minlength="8" autocomplete="new-password">
         </div>
         <div class="form-group">
-          <label for="register-team">Team Name</label>
+          <label for="register-team">Team Name <span style="color:var(--text-dim)">(optional)</span></label>
           <input type="text" id="register-team" placeholder="Engineering" autocomplete="organization">
         </div>
         <button type="submit" class="btn btn-primary btn-block">Create Account</button>
         <p class="form-footer">
-          Already have an account? <a href="#" id="switch-to-login">Log in</a>
+          Already have an account? <a href="#" id="switch-to-login">Sign in</a>
         </p>
       </form>
     </div>
@@ -73,6 +75,14 @@
   <!-- Main App Shell -->
   <div id="app" class="app hidden">
 
+    <!-- Guest Banner -->
+    <div id="guest-banner" class="guest-banner hidden">
+      <strong>You're using a free guest session.</strong>
+      <span><span class="guest-counter" id="guest-count">3</span> messages remaining.</span>
+      <button class="btn btn-primary btn-sm" id="guest-signup">Sign Up Free</button>
+      <button class="btn btn-outline btn-sm" id="guest-login">Sign In</button>
+    </div>
+
     <!-- Top Bar -->
     <header class="topbar">
       <div class="topbar-left">
@@ -83,7 +93,10 @@
             <line x1="3" y1="15" x2="17" y2="15"></line>
           </svg>
         </button>
-        <h1 class="topbar-title">BusinessLog AI</h1>
+        <h1 class="topbar-title">
+          <span class="logo-mark">B</span>
+          BusinessLog AI
+        </h1>
       </div>
       <div class="topbar-right">
         <button id="admin-toggle" class="btn btn-ghost" aria-label="Toggle admin panel">
@@ -99,12 +112,22 @@
           </button>
           <div id="user-dropdown" class="dropdown hidden" role="menu">
             <div class="dropdown-header">
-              <span id="dropdown-name" class="dropdown-name"></span>
-              <span id="dropdown-email" class="dropdown-email"></span>
+              <span id="dropdown-avatar" class="avatar avatar-sm"></span>
+              <div class="dropdown-info">
+                <span id="dropdown-name" class="dropdown-name"></span>
+                <span id="dropdown-email" class="dropdown-email"></span>
+                <span id="dropdown-role" class="dropdown-role"></span>
+              </div>
             </div>
             <hr class="dropdown-divider">
-            <button class="dropdown-item" id="btn-profile" role="menuitem">Profile Settings</button>
-            <button class="dropdown-item" id="btn-logout" role="menuitem">Log Out</button>
+            <button class="dropdown-item" id="btn-profile" role="menuitem">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+              Profile Settings
+            </button>
+            <button class="dropdown-item" id="btn-logout" role="menuitem">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+              Log Out
+            </button>
           </div>
         </div>
       </div>
@@ -117,7 +140,7 @@
       <aside id="sidebar" class="sidebar" role="navigation" aria-label="Conversations">
         <div class="sidebar-header">
           <h2 class="sidebar-heading">Chats</h2>
-          <button id="new-chat-btn" class="btn btn-primary btn-sm" type="button">+ New Chat</button>
+          <button id="new-chat-btn" class="btn btn-primary btn-sm" type="button">+ New</button>
         </div>
         <div class="sidebar-search">
           <input type="search" id="conversation-search" placeholder="Search conversations..." aria-label="Search conversations">
@@ -125,6 +148,14 @@
         <ul id="conversation-list" class="conversation-list" aria-label="Conversation list">
           <!-- Conversation items rendered by JS -->
         </ul>
+
+        <!-- Team Members -->
+        <div class="sidebar-team" id="sidebar-team">
+          <div class="sidebar-team-heading">Team</div>
+          <div id="team-members-list">
+            <!-- Team members rendered by JS -->
+          </div>
+        </div>
       </aside>
 
       <!-- Center: Chat Area -->
@@ -143,7 +174,7 @@
         <!-- Messages -->
         <div id="messages-container" class="messages-container" aria-label="Messages" role="log" aria-live="polite">
           <div class="empty-state" id="empty-chat">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="1.5">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
             </svg>
             <p>Select a conversation or start a new chat</p>
@@ -186,6 +217,7 @@
           <button class="admin-nav-btn" data-section="team">Team</button>
           <button class="admin-nav-btn" data-section="analytics">Analytics</button>
           <button class="admin-nav-btn" data-section="export">Export</button>
+          <button class="admin-nav-btn" data-section="audit">Audit</button>
         </nav>
 
         <!-- User Management Section -->
@@ -197,7 +229,7 @@
 
           <!-- Invite Form -->
           <div id="invite-form" class="invite-form hidden">
-            <input type="email" id="invite-email" placeholder="Email address" aria-label="Invite email">
+            <input type="email" id="invite-email" placeholder="colleague@company.com" aria-label="Invite email">
             <select id="invite-role" aria-label="Role for invited user">
               <option value="member">Member</option>
               <option value="admin">Admin</option>
@@ -281,55 +313,29 @@
             </div>
           </div>
 
-          <div class="chart-grid">
-            <div class="chart-card">
-              <h4>Messages / Day</h4>
-              <canvas id="chart-messages" width="300" height="160"></canvas>
-            </div>
-            <div class="chart-card">
-              <h4>Active Users</h4>
-              <canvas id="chart-users" width="300" height="160"></canvas>
-            </div>
-            <div class="chart-card">
-              <h4>Top Topics</h4>
-              <canvas id="chart-topics" width="300" height="160"></canvas>
-            </div>
+          <!-- CSS Bar Charts -->
+          <div class="css-chart" id="chart-messages-bar">
+            <h4>Messages / Day</h4>
+            <!-- Bars rendered by JS -->
+          </div>
+
+          <div class="css-chart" id="chart-users-bar">
+            <h4>Active Users</h4>
+            <!-- Bars rendered by JS -->
+          </div>
+
+          <div class="css-chart" id="chart-topics-bar">
+            <h4>Top Topics</h4>
+            <!-- Bars rendered by JS -->
           </div>
         </section>
 
         <!-- Export Section -->
         <section id="admin-export" class="admin-section hidden" aria-label="Export data">
           <h3>Export Data</h3>
-          <p class="export-desc">Download reports for your team activity and analytics.</p>
+          <p class="export-desc">Download your team's data. All exports include the selected date range.</p>
 
-          <div class="export-buttons">
-            <button class="btn btn-primary btn-block" id="export-messages" type="button">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:6px">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-              </svg>
-              Export Messages (CSV)
-            </button>
-            <button class="btn btn-primary btn-block" id="export-users" type="button">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:6px">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-              </svg>
-              Export Users (CSV)
-            </button>
-            <button class="btn btn-primary btn-block" id="export-analytics" type="button">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:6px">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-              </svg>
-              Export Analytics (CSV)
-            </button>
-          </div>
-
-          <div class="export-range">
+          <div class="export-range" style="margin-bottom:16px">
             <label for="export-date-range">Date range:</label>
             <select id="export-date-range">
               <option value="7d">Last 7 days</option>
@@ -337,6 +343,37 @@
               <option value="90d">Last 90 days</option>
               <option value="all">All time</option>
             </select>
+          </div>
+
+          <div class="export-buttons">
+            <button class="btn btn-primary btn-block" id="export-messages" type="button">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              Export Conversations (CSV)
+            </button>
+            <button class="btn btn-outline btn-block" id="export-users" type="button">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              Export Users (CSV)
+            </button>
+            <button class="btn btn-outline btn-block" id="export-analytics" type="button">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              Export Analytics (CSV)
+            </button>
+            <button class="btn btn-outline btn-block" id="export-json" type="button">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+              Export All Data (JSON)
+            </button>
+            <button class="btn btn-ghost btn-block" id="export-pdf" type="button" disabled>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+              Export Report (PDF) &mdash; Coming Soon
+            </button>
+          </div>
+        </section>
+
+        <!-- Audit Log Section -->
+        <section id="admin-audit" class="admin-section hidden" aria-label="Audit log">
+          <h3>Audit Log</h3>
+          <div class="audit-log" id="audit-log-list">
+            <!-- Audit entries rendered by JS -->
           </div>
         </section>
       </aside>

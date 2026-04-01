@@ -390,6 +390,73 @@ app.post('/api/auth/login', async (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// Auth — Get current user
+// ---------------------------------------------------------------------------
+
+app.get('/api/auth/me', authMiddleware, async (c) => {
+  const payload = c.get('user') as JwtPayload;
+
+  await ensureUsersTable(c.env.DB);
+  const user = await c.env.DB.prepare(
+    'SELECT id, email, name, role, created_at FROM users WHERE id = ?'
+  ).bind(payload.sub).first<{ id: string; email: string; name: string; role: string; created_at: string }>();
+
+  if (!user) {
+    return c.json({ error: 'User not found' }, 404);
+  }
+
+  return c.json({
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    createdAt: user.created_at,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Chat — Guest mode (no auth, rate-limited)
+// ---------------------------------------------------------------------------
+
+const GUEST_LIMIT = 3; // Free messages before requiring registration
+
+app.post('/api/chat/guest', async (c) => {
+  // Track guest usage via IP + KV
+  const clientKey = `guest:${c.req.header('cf-connecting-ip') || 'unknown'}`;
+  const usageRaw = await c.env.MEMORY.get(clientKey, 'text');
+  const usage = usageRaw ? JSON.parse(usageRaw) : { count: 0 };
+
+  if (usage.count >= GUEST_LIMIT) {
+    return c.json({ error: 'Guest limit reached. Please register for unlimited access.', limit: GUEST_LIMIT, remaining: 0 }, 429);
+  }
+
+  const body = await c.req.json<{ message: string }>();
+  const { message } = body;
+
+  if (!message?.trim()) {
+    return c.json({ error: 'message is required' }, 400);
+  }
+
+  // Increment usage
+  usage.count++;
+  await c.env.MEMORY.put(clientKey, JSON.stringify(usage), { expirationTtl: 24 * 60 * 60 });
+
+  const messages: ChatMessage[] = [
+    { role: 'system', content: getSystemPrompt() },
+    { role: 'user', content: message },
+  ];
+
+  c.executionCtx.waitUntil(recordAnalytics(c.env.ANALYTICS_KV, 'chat:guest', 'guest'));
+
+  return streamSSE(c, async (stream) => {
+    for await (const chunk of streamDeepSeek(messages, c.env.DEEPSEEK_API_KEY)) {
+      await stream.writeSSE({ data: JSON.stringify({ text: chunk }) });
+    }
+    await stream.writeSSE({ event: 'done', data: JSON.stringify({ remaining: GUEST_LIMIT - usage.count }) });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Chat — Streaming SSE
 // ---------------------------------------------------------------------------
 
@@ -746,6 +813,103 @@ app.get('/api/analytics/report', authMiddleware, roleMiddleware(['admin', 'membe
   }
 
   return c.json(reportData);
+});
+
+// ---------------------------------------------------------------------------
+// Export — Data export (JSON / CSV / Audit log)
+// ---------------------------------------------------------------------------
+
+app.get('/api/export', authMiddleware, roleMiddleware(['admin']), async (c) => {
+  await ensureUsersTable(c.env.DB);
+
+  const format = c.req.query('format') || 'json';
+
+  // Gather all exportable data
+  const users = await c.env.DB.prepare(
+    'SELECT id, email, name, role, created_at FROM users ORDER BY created_at ASC'
+  ).all();
+
+  // Gather conversations from KV (admin sees all)
+  const convList = await c.env.MEMORY.list({ prefix: 'conversation:' });
+  const conversations: { id: string; userId: string; messages: number; lastActivity?: string }[] = [];
+  for (const key of convList.keys) {
+    const parts = key.name.split(':');
+    const userId = parts[1] || 'unknown';
+    const convId = parts[2] || 'unknown';
+    const raw = await c.env.MEMORY.get(key.name, 'text');
+    const msgs: ChatMessage[] = raw ? JSON.parse(raw) : [];
+    conversations.push({
+      id: convId,
+      userId,
+      messages: msgs.length,
+      lastActivity: key.metadata as string | undefined,
+    });
+  }
+
+  // Gather analytics summary
+  const today = new Date();
+  const days: string[] = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    days.push(d.toISOString().split('T')[0]);
+  }
+
+  const analyticsDaily: { date: string; messages: number; uploads: number }[] = [];
+  let totalMessages = 0;
+  let totalUploads = 0;
+  for (const day of days) {
+    const msgKey = `events:${day}:chat:message`;
+    const fileKey = `events:${day}:file:upload`;
+    const messages = parseInt((await c.env.ANALYTICS_KV.get(msgKey)) || '0', 10);
+    const uploads = parseInt((await c.env.ANALYTICS_KV.get(fileKey)) || '0', 10);
+    analyticsDaily.push({ date: day, messages, uploads });
+    totalMessages += messages;
+    totalUploads += uploads;
+  }
+
+  const settings = {
+    dataRetentionPolicy: '30 days (configurable)',
+    exportTimestamp: new Date().toISOString(),
+    version: '1.0.0',
+  };
+
+  // Audit log entries
+  const auditEntries: { type: string; text: string; time: string }[] = [];
+  // Build audit log from analytics events
+  for (const day of days.slice(-7)) {
+    const activeList = await c.env.ANALYTICS_KV.list({ prefix: `active:${day}:` });
+    for (const key of activeList.keys) {
+      const userId = key.name.split(':').pop() || 'unknown';
+      auditEntries.push({ type: 'info', text: `User <strong>${userId}</strong> was active`, time: day });
+    }
+  }
+
+  if (format === 'csv') {
+    // Export conversations as CSV
+    const header = 'id,userId,messages,lastActivity';
+    const rows = conversations.map(c => `"${c.id}","${c.userId}",${c.messages},"${c.lastActivity || ''}"`).join('\n');
+    return c.text(header + '\n' + rows, 200, {
+      'Content-Type': 'text/csv',
+      'Content-Disposition': 'attachment; filename="businesslog-conversations.csv"',
+    });
+  }
+
+  if (format === 'audit') {
+    return c.json({ entries: auditEntries });
+  }
+
+  // Default: JSON export with everything
+  return c.json({
+    settings,
+    users: users.results,
+    conversations,
+    analytics: {
+      summary: { totalMessages, totalUploads, period: `${days[0]} to ${days[days.length - 1]}` },
+      daily: analyticsDaily,
+    },
+    auditLog: auditEntries,
+  });
 });
 
 // ---------------------------------------------------------------------------
