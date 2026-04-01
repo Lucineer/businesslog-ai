@@ -913,6 +913,573 @@ app.get('/api/export', authMiddleware, roleMiddleware(['admin']), async (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// Workspaces
+// ---------------------------------------------------------------------------
+
+import {
+  createWorkspace, getWorkspace, listWorkspacesForUser, updateWorkspace as updateWs, deleteWorkspace as deleteWs,
+  getMembers, addMember, removeMember, updateMemberRole, inviteMember, listInvites, acceptInvite,
+  getSettings, updateSettings, getActivityFeed, checkPermission,
+} from './teams/workspace';
+
+app.post('/api/workspaces', authMiddleware, async (c) => {
+  const user = c.get('user') as JwtPayload;
+  const body = await c.req.json<{ name: string; description?: string; icon?: string }>();
+
+  if (!body.name?.trim()) return c.json({ error: 'name is required' }, 400);
+
+  const ws = await createWorkspace(c.env.MEMORY, {
+    name: body.name,
+    description: body.description || '',
+    icon: body.icon || '🏢',
+    ownerId: user.sub,
+    ownerEmail: user.email,
+    ownerName: user.email,
+  });
+
+  return c.json(ws, 201);
+});
+
+app.get('/api/workspaces', authMiddleware, async (c) => {
+  const user = c.get('user') as JwtPayload;
+  const workspaces = await listWorkspacesForUser(c.env.MEMORY, user.sub);
+  return c.json(workspaces);
+});
+
+app.get('/api/workspaces/:id', authMiddleware, async (c) => {
+  const ws = await getWorkspace(c.env.MEMORY, c.req.param('id'));
+  if (!ws) return c.json({ error: 'Workspace not found' }, 404);
+  return c.json(ws);
+});
+
+app.put('/api/workspaces/:id', authMiddleware, async (c) => {
+  const user = c.get('user') as JwtPayload;
+  const wsId = c.req.param('id');
+  const ws = await getWorkspace(c.env.MEMORY, wsId);
+  if (!ws) return c.json({ error: 'Workspace not found' }, 404);
+
+  const hasPermission = await checkPermission(c.env.MEMORY, wsId, user.sub, ['owner', 'admin']);
+  if (!hasPermission) return c.json({ error: 'Insufficient permissions' }, 403);
+
+  const body = await c.req.json<{ name?: string; description?: string; icon?: string }>();
+  const updated = await updateWs(c.env.MEMORY, wsId, body);
+  return c.json(updated);
+});
+
+app.delete('/api/workspaces/:id', authMiddleware, async (c) => {
+  const user = c.get('user') as JwtPayload;
+  const wsId = c.req.param('id');
+  const ws = await getWorkspace(c.env.MEMORY, wsId);
+  if (!ws) return c.json({ error: 'Workspace not found' }, 404);
+  if (ws.ownerId !== user.sub) return c.json({ error: 'Only the owner can delete a workspace' }, 403);
+
+  await deleteWs(c.env.MEMORY, wsId);
+  return c.json({ success: true });
+});
+
+// Workspace members
+app.get('/api/workspaces/:id/members', authMiddleware, async (c) => {
+  const members = await getMembers(c.env.MEMORY, c.req.param('id'));
+  return c.json(members);
+});
+
+app.post('/api/workspaces/:id/members', authMiddleware, async (c) => {
+  const user = c.get('user') as JwtPayload;
+  const wsId = c.req.param('id');
+  const body = await c.req.json<{ userId: string; email: string; name: string; role: string }>();
+
+  try {
+    const member = await addMember(c.env.MEMORY, wsId, {
+      userId: body.userId,
+      email: body.email,
+      name: body.name,
+      role: body.role as any,
+    });
+    return c.json(member, 201);
+  } catch (err: any) {
+    return c.json({ error: err.message }, 400);
+  }
+});
+
+app.delete('/api/workspaces/:id/members/:userId', authMiddleware, async (c) => {
+  const wsId = c.req.param('id');
+  const targetId = c.req.param('userId');
+  try {
+    await removeMember(c.env.MEMORY, wsId, targetId);
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 400);
+  }
+});
+
+app.put('/api/workspaces/:id/members/:userId/role', authMiddleware, async (c) => {
+  const wsId = c.req.param('id');
+  const targetId = c.req.param('userId');
+  const body = await c.req.json<{ role: string }>();
+  try {
+    await updateMemberRole(c.env.MEMORY, wsId, targetId, body.role as any);
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 400);
+  }
+});
+
+// Workspace invites
+app.post('/api/workspaces/:id/invites', authMiddleware, async (c) => {
+  const user = c.get('user') as JwtPayload;
+  const body = await c.req.json<{ email: string; role: string }>();
+  try {
+    const invite = await inviteMember(c.env.MEMORY, c.req.param('id'), body.email, body.role as any, user.sub);
+    return c.json(invite, 201);
+  } catch (err: any) {
+    return c.json({ error: err.message }, 400);
+  }
+});
+
+app.get('/api/workspaces/:id/invites', authMiddleware, async (c) => {
+  const invites = await listInvites(c.env.MEMORY, c.req.param('id'));
+  return c.json(invites);
+});
+
+app.post('/api/workspaces/:id/invites/:inviteId/accept', authMiddleware, async (c) => {
+  const user = c.get('user') as JwtPayload;
+  try {
+    const member = await acceptInvite(c.env.MEMORY, c.req.param('inviteId'), c.req.param('id'), user.sub, user.email, user.email);
+    return c.json(member);
+  } catch (err: any) {
+    return c.json({ error: err.message }, 400);
+  }
+});
+
+// Workspace settings
+app.get('/api/workspaces/:id/settings', authMiddleware, async (c) => {
+  const settings = await getSettings(c.env.MEMORY, c.req.param('id'));
+  if (!settings) return c.json({ error: 'Settings not found' }, 404);
+  return c.json(settings);
+});
+
+app.put('/api/workspaces/:id/settings', authMiddleware, async (c) => {
+  const body = await c.req.json<{ name?: string; timezone?: string; language?: string }>();
+  const settings = await updateSettings(c.env.MEMORY, c.req.param('id'), body);
+  return c.json(settings);
+});
+
+// Workspace activity feed
+app.get('/api/workspaces/:id/activity', authMiddleware, async (c) => {
+  const limit = parseInt(c.req.query('limit') || '50', 10);
+  const feed = await getActivityFeed(c.env.MEMORY, c.req.param('id'), limit);
+  return c.json(feed);
+});
+
+// ---------------------------------------------------------------------------
+// Threads
+// ---------------------------------------------------------------------------
+
+import {
+  createThread, getThread, listThreadsByWorkspace, listThreadsByChannel, deleteThread,
+  getReplies, addReply, editReply, deleteReply, generateSummary,
+  pinThread, unpinThread, listPinnedThreads, moveThread,
+  updatePermissions as updateThreadPermissions, canViewThread, canReplyToThread,
+} from './threads/threads';
+
+app.post('/api/threads', authMiddleware, async (c) => {
+  const user = c.get('user') as JwtPayload;
+  const body = await c.req.json<{
+    workspaceId: string; channelId: string; parentMessageId: string;
+    title: string; initialMessage: string; permissions?: any;
+  }>();
+
+  if (!body.workspaceId || !body.title || !body.initialMessage) {
+    return c.json({ error: 'workspaceId, title, and initialMessage are required' }, 400);
+  }
+
+  const thread = await createThread(c.env.MEMORY, {
+    workspaceId: body.workspaceId,
+    channelId: body.channelId || 'general',
+    parentMessageId: body.parentMessageId || crypto.randomUUID(),
+    title: body.title,
+    createdBy: user.sub,
+    createdByEmail: user.email,
+    initialMessage: body.initialMessage,
+    permissions: body.permissions,
+  });
+
+  return c.json(thread, 201);
+});
+
+app.get('/api/threads/:id', authMiddleware, async (c) => {
+  const thread = await getThread(c.env.MEMORY, c.req.param('id'));
+  if (!thread) return c.json({ error: 'Thread not found' }, 404);
+  return c.json(thread);
+});
+
+app.get('/api/workspaces/:id/threads', authMiddleware, async (c) => {
+  const threads = await listThreadsByWorkspace(c.env.MEMORY, c.req.param('id'));
+  return c.json(threads);
+});
+
+app.get('/api/workspaces/:id/threads/channel/:channelId', authMiddleware, async (c) => {
+  const threads = await listThreadsByChannel(c.env.MEMORY, c.req.param('id'), c.req.param('channelId'));
+  return c.json(threads);
+});
+
+app.delete('/api/threads/:id', authMiddleware, async (c) => {
+  await deleteThread(c.env.MEMORY, c.req.param('id'));
+  return c.json({ success: true });
+});
+
+// Replies
+app.get('/api/threads/:id/replies', authMiddleware, async (c) => {
+  const replies = await getReplies(c.env.MEMORY, c.req.param('id'));
+  return c.json(replies);
+});
+
+app.post('/api/threads/:id/replies', authMiddleware, async (c) => {
+  const user = c.get('user') as JwtPayload;
+  const body = await c.req.json<{ content: string }>();
+  if (!body.content?.trim()) return c.json({ error: 'content is required' }, 400);
+  const reply = await addReply(c.env.MEMORY, c.req.param('id'), {
+    userId: user.sub, userName: user.email, content: body.content,
+  });
+  return c.json(reply, 201);
+});
+
+app.put('/api/threads/:id/replies/:replyId', authMiddleware, async (c) => {
+  const body = await c.req.json<{ content: string }>();
+  try {
+    await editReply(c.env.MEMORY, c.req.param('id'), c.req.param('replyId'), body.content);
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 404);
+  }
+});
+
+app.delete('/api/threads/:id/replies/:replyId', authMiddleware, async (c) => {
+  await deleteReply(c.env.MEMORY, c.req.param('id'), c.req.param('replyId'));
+  return c.json({ success: true });
+});
+
+// AI Summary
+app.post('/api/threads/:id/summary', authMiddleware, async (c) => {
+  try {
+    const summary = await generateSummary(c.env.MEMORY, c.req.param('id'), c.env.DEEPSEEK_API_KEY);
+    return c.json({ summary });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// Pinning
+app.post('/api/threads/:id/pin', authMiddleware, async (c) => {
+  try {
+    await pinThread(c.env.MEMORY, c.req.param('id'));
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 404);
+  }
+});
+
+app.post('/api/threads/:id/unpin', authMiddleware, async (c) => {
+  try {
+    await unpinThread(c.env.MEMORY, c.req.param('id'));
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 404);
+  }
+});
+
+app.get('/api/workspaces/:id/threads/pinned', authMiddleware, async (c) => {
+  const pinned = await listPinnedThreads(c.env.MEMORY, c.req.param('id'));
+  return c.json(pinned);
+});
+
+// Move thread
+app.post('/api/threads/:id/move', authMiddleware, async (c) => {
+  const body = await c.req.json<{ channelId: string }>();
+  try {
+    await moveThread(c.env.MEMORY, c.req.param('id'), body.channelId);
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 404);
+  }
+});
+
+// Thread permissions
+app.put('/api/threads/:id/permissions', authMiddleware, async (c) => {
+  const body = await c.req.json<any>();
+  try {
+    await updateThreadPermissions(c.env.MEMORY, c.req.param('id'), body);
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 404);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Analytics Dashboard (enhanced)
+// ---------------------------------------------------------------------------
+
+import {
+  getDashboard as getFullDashboard, exportToCSV, exportToPDFText,
+  recordTokenUsage, recordResponseTime, recordTopic, updateUserActivity,
+} from './analytics/dashboard';
+
+app.get('/api/analytics/v2/dashboard', authMiddleware, roleMiddleware(['admin', 'member']), async (c) => {
+  const days = parseInt(c.req.query('days') || '30', 10);
+  const report = await getFullDashboard(c.env.ANALYTICS_KV, c.env.DB, days);
+  return c.json(report);
+});
+
+app.get('/api/analytics/v2/export', authMiddleware, roleMiddleware(['admin']), async (c) => {
+  const days = parseInt(c.req.query('days') || '30', 10);
+  const format = c.req.query('format') || 'json';
+  const report = await getFullDashboard(c.env.ANALYTICS_KV, c.env.DB, days);
+
+  if (format === 'csv') {
+    return c.text(exportToCSV(report), 200, {
+      'Content-Type': 'text/csv',
+      'Content-Disposition': `attachment; filename="analytics-${report.period.from}-to-${report.period.to}.csv"`,
+    });
+  }
+
+  if (format === 'pdf') {
+    return c.text(exportToPDFText(report), 200, {
+      'Content-Type': 'text/plain',
+      'Content-Disposition': `attachment; filename="analytics-${report.period.from}-to-${report.period.to}.txt"`,
+    });
+  }
+
+  return c.json(report);
+});
+
+// ---------------------------------------------------------------------------
+// Admin Panel (enhanced)
+// ---------------------------------------------------------------------------
+
+import {
+  addAuditEntry, getAuditLog, getAuditLogForUser,
+  inviteUser, removeUser as adminRemoveUser, changeUserRole,
+  getRetentionPolicy, setRetentionPolicy, enforceRetentionPolicy,
+  createBackup, listBackups, restoreBackup, deleteBackup,
+  createApiKey, listApiKeys, validateApiKey, revokeApiKey,
+} from './admin/admin';
+
+// Audit log
+app.get('/api/admin/audit', authMiddleware, roleMiddleware(['admin']), async (c) => {
+  const days = parseInt(c.req.query('days') || '30', 10);
+  const log = await getAuditLog(c.env.MEMORY, days);
+  return c.json(log);
+});
+
+app.get('/api/admin/audit/user/:userId', authMiddleware, roleMiddleware(['admin']), async (c) => {
+  const days = parseInt(c.req.query('days') || '30', 10);
+  const log = await getAuditLogForUser(c.env.MEMORY, c.req.param('userId'), days);
+  return c.json(log);
+});
+
+// User management (admin)
+app.post('/api/admin/users/invite', authMiddleware, roleMiddleware(['admin']), async (c) => {
+  const user = c.get('user') as JwtPayload;
+  const body = await c.req.json<{ email: string; role: string }>();
+  await ensureUsersTable(c.env.DB);
+  try {
+    await inviteUser(c.env.MEMORY, c.env.DB, body.email, body.role || 'member', user.sub, user.email);
+    return c.json({ success: true }, 201);
+  } catch (err: any) {
+    return c.json({ error: err.message }, 400);
+  }
+});
+
+app.delete('/api/admin/users/:id', authMiddleware, roleMiddleware(['admin']), async (c) => {
+  const user = c.get('user') as JwtPayload;
+  await ensureUsersTable(c.env.DB);
+  try {
+    await adminRemoveUser(c.env.MEMORY, c.env.DB, c.req.param('id'), user.sub, user.email);
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 400);
+  }
+});
+
+app.put('/api/admin/users/:id/role', authMiddleware, roleMiddleware(['admin']), async (c) => {
+  const user = c.get('user') as JwtPayload;
+  const body = await c.req.json<{ role: string }>();
+  await ensureUsersTable(c.env.DB);
+  try {
+    await changeUserRole(c.env.MEMORY, c.env.DB, c.req.param('id'), body.role, user.sub, user.email);
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 400);
+  }
+});
+
+// Data retention
+app.get('/api/admin/retention', authMiddleware, roleMiddleware(['admin']), async (c) => {
+  const policy = await getRetentionPolicy(c.env.MEMORY);
+  return c.json(policy);
+});
+
+app.put('/api/admin/retention', authMiddleware, roleMiddleware(['admin']), async (c) => {
+  const user = c.get('user') as JwtPayload;
+  const body = await c.req.json<{ conversationDays?: number; fileDays?: number; auditDays?: number; analyticsDays?: number }>();
+  const policy = await setRetentionPolicy(c.env.MEMORY, body, user.sub, user.email);
+  return c.json(policy);
+});
+
+app.post('/api/admin/retention/enforce', authMiddleware, roleMiddleware(['admin']), async (c) => {
+  const result = await enforceRetentionPolicy(c.env.MEMORY);
+  return c.json(result);
+});
+
+// Backup / Restore
+app.post('/api/admin/backups', authMiddleware, roleMiddleware(['admin']), async (c) => {
+  const body = await c.req.json<{ name: string; type?: 'full' | 'partial' }>();
+  await ensureUsersTable(c.env.DB);
+  const backup = await createBackup(c.env.MEMORY, c.env.DB, body.name, body.type || 'full');
+  return c.json(backup, 201);
+});
+
+app.get('/api/admin/backups', authMiddleware, roleMiddleware(['admin']), async (c) => {
+  const backups = await listBackups(c.env.MEMORY);
+  return c.json(backups);
+});
+
+app.post('/api/admin/backups/:id/restore', authMiddleware, roleMiddleware(['admin']), async (c) => {
+  try {
+    await restoreBackup(c.env.MEMORY, c.req.param('id'));
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 404);
+  }
+});
+
+app.delete('/api/admin/backups/:id', authMiddleware, roleMiddleware(['admin']), async (c) => {
+  await deleteBackup(c.env.MEMORY, c.req.param('id'));
+  return c.json({ success: true });
+});
+
+// API Key management
+app.post('/api/admin/apikeys', authMiddleware, roleMiddleware(['admin']), async (c) => {
+  const user = c.get('user') as JwtPayload;
+  const body = await c.req.json<{ name: string; permissions?: string[] }>();
+  const { record, plainKey } = await createApiKey(c.env.MEMORY, {
+    name: body.name,
+    permissions: body.permissions || ['read'],
+    createdBy: user.sub,
+    createdByEmail: user.email,
+  });
+  return c.json({ ...record, key: plainKey }, 201);
+});
+
+app.get('/api/admin/apikeys', authMiddleware, roleMiddleware(['admin']), async (c) => {
+  const keys = await listApiKeys(c.env.MEMORY);
+  return c.json(keys);
+});
+
+app.delete('/api/admin/apikeys/:id', authMiddleware, roleMiddleware(['admin']), async (c) => {
+  const user = c.get('user') as JwtPayload;
+  try {
+    await revokeApiKey(c.env.MEMORY, c.req.param('id'), user.sub, user.email);
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 404);
+  }
+});
+
+// API Key auth middleware (for external API access)
+app.use('/api/external/*', async (c, next) => {
+  const keyHeader = c.req.header('X-API-Key');
+  if (!keyHeader) return c.json({ error: 'Missing X-API-Key header' }, 401);
+
+  const record = await validateApiKey(c.env.MEMORY, keyHeader);
+  if (!record) return c.json({ error: 'Invalid or revoked API key' }, 401);
+
+  c.set('apiKey', record);
+  await next();
+});
+
+app.get('/api/external/health', async (c) => {
+  return c.json({ status: 'ok', message: 'External API is active' });
+});
+
+// ---------------------------------------------------------------------------
+// Webhooks
+// ---------------------------------------------------------------------------
+
+import {
+  createWebhook, getWebhook, listWebhooks, updateWebhook as updateWh,
+  deleteWebhook as deleteWh, getDeliveryLog, retryDelivery, testWebhook, broadcastEvent,
+} from './webhooks/webhooks';
+
+app.post('/api/webhooks', authMiddleware, async (c) => {
+  const user = c.get('user') as JwtPayload;
+  const body = await c.req.json<{ url: string; events: string[]; description?: string }>();
+
+  if (!body.url || !body.events?.length) {
+    return c.json({ error: 'url and events are required' }, 400);
+  }
+
+  const webhook = await createWebhook(c.env.MEMORY, {
+    url: body.url,
+    events: body.events as any[],
+    description: body.description || '',
+    createdBy: user.sub,
+  });
+
+  return c.json(webhook, 201);
+});
+
+app.get('/api/webhooks', authMiddleware, async (c) => {
+  const webhooks = await listWebhooks(c.env.MEMORY);
+  return c.json(webhooks);
+});
+
+app.get('/api/webhooks/:id', authMiddleware, async (c) => {
+  const webhook = await getWebhook(c.env.MEMORY, c.req.param('id'));
+  if (!webhook) return c.json({ error: 'Webhook not found' }, 404);
+  return c.json(webhook);
+});
+
+app.put('/api/webhooks/:id', authMiddleware, async (c) => {
+  const body = await c.req.json<{ url?: string; events?: string[]; description?: string; active?: boolean }>();
+  const updated = await updateWh(c.env.MEMORY, c.req.param('id'), body as any);
+  if (!updated) return c.json({ error: 'Webhook not found' }, 404);
+  return c.json(updated);
+});
+
+app.delete('/api/webhooks/:id', authMiddleware, async (c) => {
+  await deleteWh(c.env.MEMORY, c.req.param('id'));
+  return c.json({ success: true });
+});
+
+// Webhook delivery log
+app.get('/api/webhooks/:id/deliveries', authMiddleware, async (c) => {
+  const limit = parseInt(c.req.query('limit') || '50', 10);
+  const deliveries = await getDeliveryLog(c.env.MEMORY, c.req.param('id'), limit);
+  return c.json(deliveries);
+});
+
+// Retry a failed delivery
+app.post('/api/webhooks/:webhookId/deliveries/:deliveryId/retry', authMiddleware, async (c) => {
+  try {
+    const delivery = await retryDelivery(c.env.MEMORY, c.req.param('webhookId'), c.req.param('deliveryId'));
+    return c.json(delivery);
+  } catch (err: any) {
+    return c.json({ error: err.message }, 400);
+  }
+});
+
+// Test webhook
+app.post('/api/webhooks/:id/test', authMiddleware, async (c) => {
+  try {
+    const delivery = await testWebhook(c.env.MEMORY, c.req.param('id'));
+    return c.json(delivery);
+  } catch (err: any) {
+    return c.json({ error: err.message }, 400);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Export
 // ---------------------------------------------------------------------------
 
