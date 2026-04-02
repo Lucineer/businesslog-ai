@@ -1,25 +1,12 @@
 name = "businesslog-ai"
 main = "src/worker.ts"
-compatibility_date = "2024-05-29"
-
-[vars]
-ENVIRONMENT = "production"
+compatibility_date = "2024-01-01"
 
 [[kv_namespaces]]
 binding = "MEMORY"
-id = "YOUR_KV_NAMESPACE_ID"
+id = "04ed31ca63304e3c93002bd0dce37506"
 
-[[kv_namespaces]]
-binding = "ANALYTICS_KV"
-id = "YOUR_ANALYTICS_KV_ID"
-
-[[d1_databases]]
-binding = "DB"
-database_name = "businesslog-db"
-database_id = "YOUR_D1_DATABASE_ID"
-
-[env.production]
-name = "businesslog-ai"
-routes = [
-  { pattern = "businesslog.ai/*", zone_name = "businesslog.ai" }
-]
+[vars]
+AGENT_NAME = "BusinessAgent"
+AGENT_TONE = "professional, organized, proactive"
+AGENT_AVATAR = "🏢"
