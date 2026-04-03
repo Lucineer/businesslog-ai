@@ -1,3 +1,4 @@
+import { softActualize, confidenceScore } from './lib/soft-actualize.js';
 /**
  * businesslog-ai Cloudflare Worker
  *
@@ -315,7 +316,15 @@ app.get('/js/app.js', async (c) => {
 // Health
 // ---------------------------------------------------------------------------
 
-app.get("/health", (c) => c.json({status:"ok",agent:"BusinessLog"}));
+app.get("/health", (c) => c.json({status:'ok',agent:'businesslog-ai',version:'1.1.0',agentCount:2,modules:['chat','files','auth','team','analytics','meeting-sim','seed'],seedVersion:'2024.04',timestamp:Date.now()}));
+app.get('/api/seed', (c) => c.json({
+  domain: 'businesslog-ai', description: 'Business intelligence — CRM, meetings, team analytics', seedVersion: '2024.04',
+  frameworks: ['STAR method', 'OKR', 'weekly standup', '1:1 meeting template', 'retrospective', 'Eisenhower matrix'],
+  crmPatterns: ['lead scoring', 'pipeline stages', 'deal velocity', 'churn prediction', 'NPS tracking'],
+  meetingFormats: ['standup', '1:1', 'sprint planning', 'retrospective', 'all-hands', 'brainstorm'],
+  systemPrompt: 'You are BusinessLog, a business intelligence assistant.'
+}));
+
 app.get("/api/health", (c) => {
   const uptime = Math.floor((Date.now() - startTime) / 1000);
   return c.json({ status: 'ok', version: '1.0.0', uptime });
