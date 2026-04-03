@@ -1,3 +1,5 @@
+import { selectModel } from './lib/model-router.js';
+import { trackConfidence, getConfidence } from './lib/confidence-tracker.js';
 import { softActualize, confidenceScore } from './lib/soft-actualize.js';
 /**
  * businesslog-ai Cloudflare Worker
@@ -311,7 +313,10 @@ app.post('/api/chat/public', async (c) => {
     const apiKey = c.env?.OPENAI_API_KEY || c.env?.ANTHROPIC_API_KEY || c.env?.GEMINI_API_KEY;
     if (!apiKey) return c.json({ error: 'No API key configured. Visit /setup.' }, 503);
     const messages = [{ role: 'system', content: 'You are BusinessLog.ai, a business management assistant.' }, ...(body.messages || [{ role: 'user', content: body.message || '' }])];
-    const resp = await callLLM(apiKey, messages);
+    const userMessage = (body.messages || [{ role: 'user', content: body.message || '' }]).map((m) => m.content).join(' ');
+    const cached = await deadbandCheck(c.env, userMessage);
+    let resp;
+    if (cached) { resp = cached; } else { resp = await callLLM(apiKey, messages); await deadbandStore(c.env, userMessage, resp); }
     return c.json({ success: true, response: resp });
   } catch (e: any) { return c.json({ error: e.message }, 500); }
 });
@@ -323,6 +328,7 @@ npm install
 npx wrangler deploy</code></div></div><div class="footer">BusinessLog.ai — Part of the Cocapn Ecosystem</div></body></html>`);
 });
 
+app.get('/api/confidence', async (c) => { const scores = await getConfidence(c.env); return c.json(scores); });
 app.get('/app', async (c) => {
   return c.html(await c.env.MEMORY.get('public:app.html', 'text') || '<h1>App</h1>');
 });
