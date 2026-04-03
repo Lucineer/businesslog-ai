@@ -9,6 +9,8 @@ import { softActualize, confidenceScore } from './lib/soft-actualize.js';
 import { Hono } from 'hono';
 import { callLLM, generateSetupHTML } from './lib/byok.js';
 import { streamSSE } from 'hono/streaming';
+import { deadbandCheck, deadbandStore, getEfficiencyStats } from './lib/deadband.js';
+import { logResponse } from './lib/response-logger.js';
 
 // ---------------------------------------------------------------------------
 // Type bindings
@@ -341,6 +343,10 @@ app.get('/js/app.js', async (c) => {
 // Health
 // ---------------------------------------------------------------------------
 
+app.get('/api/efficiency', async (c) => {
+  const stats = await getEfficiencyStats(c.env.MEMORY as any, 'businesslog-ai');
+  return c.json({ success: true, ...stats });
+});
 app.get("/health", (c) => c.json({status:'ok',agent:'businesslog-ai',version:'1.1.0',agentCount:2,modules:['chat','files','auth','team','analytics','meeting-sim','seed'],seedVersion:'2024.04',timestamp:Date.now()}));
 app.get('/api/seed', (c) => c.json({
   domain: 'businesslog-ai', description: 'Business intelligence — CRM, meetings, team analytics', seedVersion: '2024.04',
@@ -1451,8 +1457,6 @@ app.get('/api/external/health', async (c) => {
 // ---------------------------------------------------------------------------
 
 import {
-import { deadbandCheck, deadbandStore, getEfficiencyStats } from './lib/deadband.js';
-import { logResponse } from './lib/response-logger.js';
   createWebhook, getWebhook, listWebhooks, updateWebhook as updateWh,
   deleteWebhook as deleteWh, getDeliveryLog, retryDelivery, testWebhook, broadcastEvent,
 } from './webhooks/webhooks';
