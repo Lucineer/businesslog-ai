@@ -362,6 +362,7 @@ app.get('/api/efficiency', async (c) => {
   return c.json({ success: true, ...stats });
 });
 app.get("/health", (c) => c.json({status:'ok',agent:'businesslog-ai',version:'1.1.0',agentCount:2,modules:['chat','files','auth','team','analytics','meeting-sim','seed'],seedVersion:'2024.04',timestamp:Date.now()}));
+app.get("/vessel.json", async (c) => { try { const vj = await import('./vessel.json', { with: { type: 'json' } }); return c.json(vj.default || vj); } catch { return c.json({}); } });
 app.get('/api/seed', (c) => c.json({
   domain: 'businesslog-ai', description: 'Business intelligence — CRM, meetings, team analytics', seedVersion: '2024.04',
   frameworks: ['STAR method', 'OKR', 'weekly standup', '1:1 meeting template', 'retrospective', 'Eisenhower matrix'],
